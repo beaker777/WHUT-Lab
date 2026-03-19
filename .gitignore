@@ -38,5 +38,5 @@ build/
 .DS_Store
 
 ### Frontend ###
-frontend/node_modules/
+**/node_modules
 frontend/dist/

@@ -1,98 +1,171 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Cloud,
+  Gem,
+  Heart,
+  Leaf,
+  Moon,
+  Star,
+  Sun,
+  Zap
+} from "lucide-react";
+import { initGameBoard, matchCheck } from "../services/gameApi";
+import type { CellData, MatchVertex } from "../types/game";
+import { COLS, ROWS, createBoardFromMap, createEmptyBoard, createMapFromBoard, updateBoardCell } from "../utils/board";
 
-const ROWS = 10;
-const COLS = 16;
-const PAIR_COUNT = (ROWS * COLS) / 2;
-const ICON_SET = ["🍒", "🍋", "🍇", "🍉", "🍑", "🥝", "🍍", "🍓"];
+const LINE_DISPLAY_MS = 650;
 
-export interface CellData {
+const TILE_ICONS = [Heart, Star, Sun, Moon, Cloud, Leaf, Gem, Zap] as const;
+const TILE_COLORS = [
+  "text-rose-400",
+  "text-amber-400",
+  "text-orange-400",
+  "text-violet-400",
+  "text-sky-400",
+  "text-emerald-400",
+  "text-cyan-500",
+  "text-fuchsia-400"
+] as const;
+
+interface LinePoint {
   x: number;
   y: number;
-  type: number;
-  isEmpty: boolean;
-  isSelected: boolean;
-}
-
-function shuffle<T>(items: T[]) {
-  const next = [...items];
-
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[randomIndex]] = [next[randomIndex], next[index]];
-  }
-
-  return next;
-}
-
-function createInitialBoard(): CellData[][] {
-  const pairTypes = Array.from({ length: PAIR_COUNT }, (_, index) => index % ICON_SET.length);
-  const shuffledTypes = shuffle([...pairTypes, ...pairTypes]);
-
-  return Array.from({ length: ROWS }, (_, x) =>
-    Array.from({ length: COLS }, (_, y) => {
-      const type = shuffledTypes[x * COLS + y];
-
-      return {
-        x,
-        y,
-        type,
-        isEmpty: false,
-        isSelected: false
-      };
-    })
-  );
-}
-
-function updateCell(
-  board: CellData[][],
-  target: Pick<CellData, "x" | "y">,
-  updates: Partial<CellData>
-) {
-  return board.map((row, rowIndex) =>
-    row.map((cell, colIndex) =>
-      rowIndex === target.x && colIndex === target.y ? { ...cell, ...updates } : cell
-    )
-  );
 }
 
 export function HappyLinkGame() {
-  const [board, setBoard] = useState<CellData[][]>(() => createInitialBoard());
+  const [board, setBoard] = useState<CellData[][]>(() => createEmptyBoard());
   const [selectedCells, setSelectedCells] = useState<CellData[]>([]);
+  const [statusMessage, setStatusMessage] = useState("棋盘准备中，马上开始配对。");
+  const [pathPreview, setPathPreview] = useState<MatchVertex[]>([]);
+  const [linePoints, setLinePoints] = useState<LinePoint[]>([]);
+  const [isChecking, setIsChecking] = useState(false);
+  const [isLoadingBoard, setIsLoadingBoard] = useState(false);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const cellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const clearLineTimerRef = useRef<number | null>(null);
 
   const selectedCount = selectedCells.length;
   const totalCells = useMemo(() => ROWS * COLS, []);
 
-  const handleStartGame = () => {
-    setBoard(createInitialBoard());
-    setSelectedCells([]);
+  const loadInitialBoard = async () => {
+    setIsLoadingBoard(true);
+
+    try {
+      const result = await initGameBoard();
+      setBoard(createBoardFromMap(result.map));
+      setSelectedCells([]);
+      setPathPreview([]);
+      setLinePoints([]);
+      setStatusMessage(result.success ? "新棋局已就绪，试着找出第一对可连接的图案吧。" : "棋盘初始化失败。");
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("连接服务器失败，暂时无法加载棋盘。");
+    } finally {
+      setIsLoadingBoard(false);
+    }
   };
 
   const clearSelectedState = (cells: CellData[]) => {
     setBoard((currentBoard) =>
       cells.reduce(
-        (nextBoard, cell) => updateCell(nextBoard, cell, { isSelected: false }),
+        (nextBoard, cell) => updateBoardCell(nextBoard, cell, { isSelected: false }),
         currentBoard
       )
     );
     setSelectedCells([]);
   };
 
-  const handleMatchCheck = async (cell1: CellData, cell2: CellData) => {
-    // TODO: 发送 fetch 请求给 Spring Boot 后端进行连通判断
-    console.log("Pending backend match check:", { cell1, cell2 });
+  const drawLinkLine = (path: MatchVertex[]) => {
+    if (!boardRef.current || path.length < 2) {
+      setLinePoints([]);
+      return;
+    }
 
-    await Promise.resolve();
-    clearSelectedState([cell1, cell2]);
+    const boardRect = boardRef.current.getBoundingClientRect();
+    const points = path
+      .map((point) => {
+        const cellElement = cellRefs.current[`${point.row}-${point.col}`];
+        if (!cellElement) {
+          return null;
+        }
+
+        const cellRect = cellElement.getBoundingClientRect();
+        return {
+          x: cellRect.left - boardRect.left + cellRect.width / 2,
+          y: cellRect.top - boardRect.top + cellRect.height / 2
+        };
+      })
+      .filter((point): point is LinePoint => point !== null);
+
+    setLinePoints(points);
+
+    if (points.length > 1) {
+      if (clearLineTimerRef.current !== null) {
+        window.clearTimeout(clearLineTimerRef.current);
+      }
+      clearLineTimerRef.current = window.setTimeout(() => {
+        setLinePoints([]);
+        clearLineTimerRef.current = null;
+      }, LINE_DISPLAY_MS);
+    }
+  };
+
+  useEffect(() => {
+    void loadInitialBoard();
+    return () => {
+      if (clearLineTimerRef.current !== null) {
+        window.clearTimeout(clearLineTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleMatchCheck = async (cell1: CellData, cell2: CellData) => {
+    setIsChecking(true);
+
+    try {
+      const result = await matchCheck({
+        map: createMapFromBoard(board),
+        v1: {
+          row: cell1.x,
+          col: cell1.y,
+          type: cell1.type
+        },
+        v2: {
+          row: cell2.x,
+          col: cell2.y,
+          type: cell2.type
+        }
+      });
+      setPathPreview(result.path ?? []);
+      setStatusMessage(
+        result.connected ? "消除成功，继续寻找下一对图案。" : "这两个图案暂时无法连接，换一组试试。"
+      );
+      drawLinkLine(result.path ?? []);
+
+      if (result.map?.length === ROWS) {
+        setBoard(createBoardFromMap(result.map));
+        setSelectedCells([]);
+        return;
+      }
+
+      clearSelectedState([cell1, cell2]);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("匹配请求失败，请确认游戏服务运行正常。");
+      clearSelectedState([cell1, cell2]);
+    } finally {
+      setIsChecking(false);
+    }
   };
 
   const handleCellClick = (cell: CellData) => {
-    if (cell.isEmpty || cell.isSelected || selectedCells.length >= 2) {
+    if (isLoadingBoard || isChecking || cell.isEmpty || cell.isSelected || selectedCells.length >= 2) {
       return;
     }
 
     const nextSelectedCells = [...selectedCells, { ...cell, isSelected: true }];
 
-    setBoard((currentBoard) => updateCell(currentBoard, cell, { isSelected: true }));
+    setBoard((currentBoard) => updateBoardCell(currentBoard, cell, { isSelected: true }));
     setSelectedCells(nextSelectedCells);
 
     if (nextSelectedCells.length === 2) {
@@ -101,85 +174,143 @@ export function HappyLinkGame() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-auto bg-space-grid px-4 py-8 text-slate-50">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[1440px] flex-col gap-8 rounded-[32px] border border-white/15 bg-white/10 p-6 shadow-glass backdrop-blur-2xl lg:p-10">
-        <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-pink-100 via-amber-50 to-sky-100 px-4 py-8 text-slate-800">      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute left-[-4rem] top-12 h-40 w-40 md:h-56 md:w-56 rounded-full bg-pink-200/60 blur-3xl" />
+        <div className="absolute right-[8%] top-24 h-44 w-44 md:h-64 md:w-64 rounded-full bg-teal-100/60 blur-3xl" />
+        <div className="absolute bottom-16 left-[12%] h-48 w-48 md:h-72 md:w-72 rounded-full bg-sky-200/60 blur-3xl" />
+      </div>
+        <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[1440px] flex-col gap-8 rounded-[32px] border border-white/60 bg-white/50 p-6 shadow-[0_8px_32px_rgba(255,192,203,0.15)] backdrop-blur-xl lg:p-10">        <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
-            <p className="text-sm uppercase tracking-[0.4em] text-aurora-400/90">
-              Glassmorphism Arcade
+            <p className="text-sm uppercase tracking-[0.4em] text-rose-400">
+              Macaron Arcade
             </p>
             <div>
-              <h1 className="text-4xl font-black tracking-[0.18em] text-white md:text-5xl">
+              <h1 className="text-4xl font-black tracking-[0.18em] text-slate-900 md:text-5xl">
                 欢乐连连看
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200/85 md:text-base">
-                经典实验项目的 Web 版重构，采用 10 x 16 固定棋盘、毛玻璃卡片和现代化交互反馈。
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-700 md:text-base">
+                在柔和的马卡龙棋盘里，快速找出两枚可以相连的图案，完成整局清屏挑战。
               </p>
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-            <div className="rounded-2xl border border-white/15 bg-slate-950/25 px-4 py-3 text-sm text-slate-100/90 backdrop-blur-xl">
-              已选中 <span className="font-bold text-aurora-400">{selectedCount}</span> / 2
-              <span className="mx-2 text-white/25">|</span>
-              总格子 <span className="font-bold text-cyan-300">{totalCells}</span>
+            <div className="rounded-2xl border border-white/65 bg-white/60 px-4 py-3 text-sm text-slate-700 backdrop-blur-xl">
+              已选中 <span className="font-bold text-rose-400">{selectedCount}</span> / 2
+              <span className="mx-2 text-slate-400">|</span>
+              总格子 <span className="font-bold text-sky-400">{totalCells}</span>
             </div>
             <button
               type="button"
-              onClick={handleStartGame}
-              className="rounded-2xl border border-emerald-200/40 bg-gradient-to-r from-emerald-300/90 via-cyan-300/90 to-sky-300/90 px-6 py-4 text-base font-bold text-slate-950 shadow-[0_12px_40px_rgba(94,234,212,0.35)] transition duration-200 hover:scale-[1.02] hover:shadow-[0_18px_50px_rgba(103,232,249,0.45)] focus:outline-none focus:ring-4 focus:ring-emerald-200/60"
+              onClick={() => void loadInitialBoard()}
+              disabled={isLoadingBoard}
+              className="rounded-2xl border border-white/80 bg-gradient-to-r from-pink-200 via-amber-100 to-green-100 px-6 py-4 text-base font-bold text-slate-900 shadow-[0_12px_40px_rgba(248,200,220,0.38)] transition duration-200 hover:scale-[1.02] hover:shadow-[0_18px_50px_rgba(205,231,255,0.4)] focus:outline-none focus:ring-4 focus:ring-pink-200/80 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              开始游戏 / 重新开始
+              {isLoadingBoard ? "正在准备棋盘..." : "开始游戏 / 重新开始"}
             </button>
           </div>
         </header>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="rounded-[28px] border border-white/15 bg-slate-950/20 p-4 backdrop-blur-xl md:p-5">
+          <div className="rounded-[28px] border border-white/65 bg-white/42 p-4 backdrop-blur-xl md:p-5">
             <div
-              className="grid gap-2 md:gap-2.5"
+              ref={boardRef}
+              className="relative grid gap-2 md:gap-2.5"
+              data-board-grid="true"
               style={{
                 gridTemplateRows: `repeat(${ROWS}, minmax(0, 1fr))`,
                 gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`
               }}
             >
+              {linePoints.length > 1 && (
+                  <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible animate-pulse">
+                    {/* 1. 底层：管线的阴影/外边框 (马卡龙粉红) */}
+                    <polyline
+                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                        fill="none"
+                        stroke="#fbcfe8" /* Tailwind pink-200 */
+                        strokeLinecap="square"
+                        strokeLinejoin="miter" /* miter 让拐角变成锋利的直角，还原经典连连看 */
+                        strokeWidth="14"
+                    />
+
+                    {/* 2. 中层：管线的主体颜色 (稍深的粉色) */}
+                    <polyline
+                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                        fill="none"
+                        stroke="#f472b6" /* Tailwind pink-400 */
+                        strokeLinecap="square"
+                        strokeLinejoin="miter"
+                        strokeWidth="8"
+                    />
+
+                    {/* 3. 表层：管线的高光反光层 (纯白)，增加 3D 立体感 */}
+                    <polyline
+                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                        fill="none"
+                        stroke="#ffffff"
+                        strokeLinecap="square"
+                        strokeLinejoin="miter"
+                        strokeWidth="3"
+                    />
+                  </svg>
+              )}
               {board.flat().map((cell) => {
-                const icon = ICON_SET[cell.type % ICON_SET.length];
+                const IconComponent = TILE_ICONS[(Math.max(cell.type, 1) - 1) % TILE_ICONS.length];
+                const iconColorClass = TILE_COLORS[(Math.max(cell.type, 1) - 1) % TILE_COLORS.length];
 
                 return (
                   <button
                     key={`${cell.x}-${cell.y}`}
+                    ref={(element) => {
+                      cellRefs.current[`${cell.x}-${cell.y}`] = element;
+                    }}
                     type="button"
                     onClick={() => handleCellClick(cell)}
                     className={[
-                      "aspect-square rounded-2xl border text-xl transition duration-200 md:text-2xl",
-                      "backdrop-blur-xl focus:outline-none focus:ring-2 focus:ring-cyan-200/70",
+                      "relative z-10 aspect-square rounded-2xl border text-xl transition duration-200 md:text-2xl",
+                      "backdrop-blur-xl focus:outline-none focus:ring-2 focus:ring-pink-200/90",
                       cell.isEmpty
-                        ? "border-white/5 bg-white/5 text-transparent"
-                        : "border-white/15 bg-white/14 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] hover:scale-[1.05] hover:border-cyan-200/50 hover:bg-white/18",
-                      cell.isSelected ? "shadow-glow ring-2 ring-emerald-200/80" : ""
+                          ? "border-white/10 bg-white/10 text-transparent" // 空地更透明
+                          : "border-white/90 bg-white/95 text-slate-800 shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:scale-[1.05] hover:border-pink-300 hover:bg-white hover:shadow-[0_8px_20px_rgba(244,114,182,0.2)]", // 实心方块加了淡粉色 hover 阴影
+                      cell.isSelected ? "shadow-glow ring-2 ring-pink-300" : ""
                     ].join(" ")}
                     aria-label={`第${cell.x + 1}行 第${cell.y + 1}列`}
                   >
-                    <span className="drop-shadow-[0_4px_18px_rgba(255,255,255,0.28)]">{icon}</span>
+                    {!cell.isEmpty && (
+                      <IconComponent
+                        className={`mx-auto h-6 w-6 drop-shadow-[0_4px_18px_rgba(255,181,208,0.35)] md:h-7 md:w-7 ${iconColorClass}`}
+                        strokeWidth={2.25}
+                      />
+                    )}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <aside className="space-y-4 rounded-[28px] border border-white/15 bg-slate-950/25 p-6 backdrop-blur-xl">
+          <aside className="space-y-4 rounded-[28px] border border-white/65 bg-white/48 p-6 backdrop-blur-xl">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">Game Notes</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">核心规则</h2>
+              <p className="text-xs uppercase tracking-[0.35em] text-rose-400">Game Guide</p>
+              <h2 className="mt-2 text-2xl font-bold text-slate-900">游戏提示</h2>
             </div>
-            <div className="space-y-3 text-sm leading-6 text-slate-200/85">
-              <p>棋盘固定为 10 行 16 列，使用 CSS Grid 严格布局。</p>
-              <p>当前前端只处理选中状态与交互表现，连通性判断交给 Spring Boot 后端。</p>
-              <p>当玩家恰好选中 2 个方块时，会触发异步校验入口 `handleMatchCheck`。</p>
+            <div className="space-y-3 text-sm leading-6 text-slate-700">
+              <p>从棋盘中选出两个相同图案，只要它们能通过不超过两个拐点连接，就能成功消除。</p>
+              <p>成功配对时会在棋盘上显示连线路径，帮助你快速判断下一步策略。</p>
+              <p>清空全部图案即可完成本局挑战，重新开始会生成一张全新的棋盘。</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-sm text-slate-100/90">
-              接口占位已保留，后续可直接在 `handleMatchCheck` 中发起 `/api` 请求。
+            <div className="rounded-2xl border border-white/60 bg-pink-50/75 px-4 py-4 text-sm text-slate-700">
+              {statusMessage}
+            </div>
+            <div className="rounded-2xl border border-white/60 bg-sky-50/75 px-4 py-4 text-sm text-slate-700">
+              连线轨迹：
+              {pathPreview.length > 0 ? (
+                <span className="ml-2 text-rose-400">
+                  {pathPreview.map((point) => `(${point.row}, ${point.col})`).join(" -> ")}
+                </span>
+              ) : (
+                <span className="ml-2 text-slate-400">等待本次配对结果</span>
+              )}
             </div>
           </aside>
         </section>

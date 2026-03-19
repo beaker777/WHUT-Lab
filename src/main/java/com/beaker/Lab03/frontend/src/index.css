@@ -3,15 +3,21 @@
 @tailwind utilities;
 
 :root {
-  color: #effcff;
+  color: #334155;
   font-family:
     "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background: #02131d;
+  background:
+    radial-gradient(circle at top, rgba(248, 200, 220, 0.68), transparent 30%),
+    linear-gradient(135deg, #fff8fc 0%, #fff3de 34%, #eefaf0 68%, #eef4ff 100%);
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
   min-height: 100vh;
 }
 
@@ -21,4 +27,53 @@ body {
 
 button {
   font: inherit;
+}
+
+@keyframes macaronFloat {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -18px, 0) scale(1.03);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes softPulse {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+.macaron-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(18px);
+  animation: macaronFloat 8s ease-in-out infinite;
+}
+
+.macaron-orb--pink {
+  background: rgba(248, 200, 220, 0.58);
+}
+
+.macaron-orb--mint {
+  background: rgba(201, 242, 208, 0.52);
+  animation-duration: 9.5s;
+}
+
+.macaron-orb--sky {
+  background: rgba(205, 231, 255, 0.54);
+  animation-duration: 10.5s;
+}
+
+.soft-link-line {
+  animation: softPulse 0.9s ease-in-out infinite;
 }
