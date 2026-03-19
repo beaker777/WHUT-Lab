@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.beaker.Lab02.mapper.EdgeMapper">
+
+    <resultMap id="dataMap" type="com.beaker.Lab02.pojo.Edge">
+        <result column="vex1" property="vex1"/>
+        <result column="vex2" property="vex2"/>
+        <result column="weight" property="weight"/>
+    </resultMap>
+
+    <select id="queryEdge" resultMap="dataMap">
+        select vex1, vex2, weight from edge
+    </select>
+
+</mapper>
