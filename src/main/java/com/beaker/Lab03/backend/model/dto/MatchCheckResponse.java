@@ -1,6 +1,6 @@
-package com.beaker.Lab03.backend.dto;
+package com.beaker.Lab03.backend.model.dto;
 
-import com.beaker.Lab03.backend.pojo.Vertex;
+import com.beaker.Lab03.backend.model.pojo.Vertex;
 import lombok.Data;
 
 import java.util.ArrayList;

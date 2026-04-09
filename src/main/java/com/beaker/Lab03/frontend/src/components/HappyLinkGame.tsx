@@ -28,8 +28,8 @@ const TILE_COLORS = [
 ] as const;
 
 interface LinePoint {
-  x: number;
-  y: number;
+  left: number;
+  top: number;
 }
 
 export function HappyLinkGame() {
@@ -46,6 +46,29 @@ export function HappyLinkGame() {
 
   const selectedCount = selectedCells.length;
   const totalCells = useMemo(() => ROWS * COLS, []);
+  const resetVisualState = () => {
+    setSelectedCells([]);
+    setPathPreview([]);
+    setLinePoints([]);
+  };
+
+  const getCellKey = (row: number, col: number) => `${row}-${col}`;
+
+  const buildMatchVertex = (cell: CellData) => ({
+    row: cell.row,
+    col: cell.col,
+    type: cell.type
+  });
+
+  const getCellButtonClassName = (cell: CellData) =>
+    [
+      "relative z-10 aspect-square rounded-2xl border text-xl transition duration-200 md:text-2xl",
+      "backdrop-blur-xl focus:outline-none focus:ring-2 focus:ring-pink-200/90",
+      cell.isEmpty
+        ? "border-white/10 bg-white/10 text-transparent"
+        : "border-white/90 bg-white/95 text-slate-800 shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:scale-[1.05] hover:border-pink-300 hover:bg-white hover:shadow-[0_8px_20px_rgba(244,114,182,0.2)]",
+      cell.isSelected ? "shadow-glow ring-2 ring-pink-300" : ""
+    ].join(" ");
 
   const loadInitialBoard = async () => {
     setIsLoadingBoard(true);
@@ -53,9 +76,7 @@ export function HappyLinkGame() {
     try {
       const result = await initGameBoard();
       setBoard(createBoardFromMap(result.map));
-      setSelectedCells([]);
-      setPathPreview([]);
-      setLinePoints([]);
+      resetVisualState();
       setStatusMessage(result.success ? "新棋局已就绪，试着找出第一对可连接的图案吧。" : "棋盘初始化失败。");
     } catch (error) {
       console.error(error);
@@ -84,15 +105,15 @@ export function HappyLinkGame() {
     const boardRect = boardRef.current.getBoundingClientRect();
     const points = path
       .map((point) => {
-        const cellElement = cellRefs.current[`${point.row}-${point.col}`];
+        const cellElement = cellRefs.current[getCellKey(point.row, point.col)];
         if (!cellElement) {
           return null;
         }
 
         const cellRect = cellElement.getBoundingClientRect();
         return {
-          x: cellRect.left - boardRect.left + cellRect.width / 2,
-          y: cellRect.top - boardRect.top + cellRect.height / 2
+          left: cellRect.left - boardRect.left + cellRect.width / 2,
+          top: cellRect.top - boardRect.top + cellRect.height / 2
         };
       })
       .filter((point): point is LinePoint => point !== null);
@@ -103,6 +124,7 @@ export function HappyLinkGame() {
       if (clearLineTimerRef.current !== null) {
         window.clearTimeout(clearLineTimerRef.current);
       }
+      // 连线只作为短暂反馈展示，避免覆盖后续点击判断。
       clearLineTimerRef.current = window.setTimeout(() => {
         setLinePoints([]);
         clearLineTimerRef.current = null;
@@ -124,17 +146,10 @@ export function HappyLinkGame() {
 
     try {
       const result = await matchCheck({
+        // 后端以当前棋盘快照作为判断依据，防止前端选中态影响消除结果。
         map: createMapFromBoard(board),
-        v1: {
-          row: cell1.x,
-          col: cell1.y,
-          type: cell1.type
-        },
-        v2: {
-          row: cell2.x,
-          col: cell2.y,
-          type: cell2.type
-        }
+        v1: buildMatchVertex(cell1),
+        v2: buildMatchVertex(cell2)
       });
       setPathPreview(result.path ?? []);
       setStatusMessage(
@@ -144,6 +159,7 @@ export function HappyLinkGame() {
 
       if (result.map?.length === ROWS) {
         setBoard(createBoardFromMap(result.map));
+        // 成功或失败后都以服务端返回的棋盘为准，保持前后端状态一致。
         setSelectedCells([]);
         return;
       }
@@ -163,6 +179,7 @@ export function HappyLinkGame() {
       return;
     }
 
+    // 连连看一次业务流程最多只缓存两次点击，第二次点击后立即发起消除判断。
     const nextSelectedCells = [...selectedCells, { ...cell, isSelected: true }];
 
     setBoard((currentBoard) => updateBoardCell(currentBoard, cell, { isSelected: true }));
@@ -174,12 +191,14 @@ export function HappyLinkGame() {
   };
 
   return (
-      <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-pink-100 via-amber-50 to-sky-100 px-4 py-8 text-slate-800">      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-pink-100 via-amber-50 to-sky-100 px-4 py-8 text-slate-800">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute left-[-4rem] top-12 h-40 w-40 md:h-56 md:w-56 rounded-full bg-pink-200/60 blur-3xl" />
         <div className="absolute right-[8%] top-24 h-44 w-44 md:h-64 md:w-64 rounded-full bg-teal-100/60 blur-3xl" />
         <div className="absolute bottom-16 left-[12%] h-48 w-48 md:h-72 md:w-72 rounded-full bg-sky-200/60 blur-3xl" />
       </div>
-        <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[1440px] flex-col gap-8 rounded-[32px] border border-white/60 bg-white/50 p-6 shadow-[0_8px_32px_rgba(255,192,203,0.15)] backdrop-blur-xl lg:p-10">        <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[1440px] flex-col gap-8 rounded-[32px] border border-white/60 bg-white/50 p-6 shadow-[0_8px_32px_rgba(255,192,203,0.15)] backdrop-blur-xl lg:p-10">
+        <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <p className="text-sm uppercase tracking-[0.4em] text-rose-400">
               Macaron Arcade
@@ -223,37 +242,33 @@ export function HappyLinkGame() {
               }}
             >
               {linePoints.length > 1 && (
-                  <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible animate-pulse">
-                    {/* 1. 底层：管线的阴影/外边框 (马卡龙粉红) */}
-                    <polyline
-                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                        fill="none"
-                        stroke="#fbcfe8" /* Tailwind pink-200 */
-                        strokeLinecap="square"
-                        strokeLinejoin="miter" /* miter 让拐角变成锋利的直角，还原经典连连看 */
-                        strokeWidth="14"
-                    />
-
-                    {/* 2. 中层：管线的主体颜色 (稍深的粉色) */}
-                    <polyline
-                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                        fill="none"
-                        stroke="#f472b6" /* Tailwind pink-400 */
-                        strokeLinecap="square"
-                        strokeLinejoin="miter"
-                        strokeWidth="8"
-                    />
-
-                    {/* 3. 表层：管线的高光反光层 (纯白)，增加 3D 立体感 */}
-                    <polyline
-                        points={linePoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                        fill="none"
-                        stroke="#ffffff"
-                        strokeLinecap="square"
-                        strokeLinejoin="miter"
-                        strokeWidth="3"
-                    />
-                  </svg>
+                <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible animate-pulse">
+                  {/* 三层描边用于模拟经典连连看的立体连线反馈。 */}
+                  <polyline
+                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    fill="none"
+                    stroke="#fbcfe8"
+                    strokeLinecap="square"
+                    strokeLinejoin="miter"
+                    strokeWidth="14"
+                  />
+                  <polyline
+                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    fill="none"
+                    stroke="#f472b6"
+                    strokeLinecap="square"
+                    strokeLinejoin="miter"
+                    strokeWidth="8"
+                  />
+                  <polyline
+                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeLinecap="square"
+                    strokeLinejoin="miter"
+                    strokeWidth="3"
+                  />
+                </svg>
               )}
               {board.flat().map((cell) => {
                 const IconComponent = TILE_ICONS[(Math.max(cell.type, 1) - 1) % TILE_ICONS.length];
@@ -261,21 +276,14 @@ export function HappyLinkGame() {
 
                 return (
                   <button
-                    key={`${cell.x}-${cell.y}`}
+                    key={getCellKey(cell.row, cell.col)}
                     ref={(element) => {
-                      cellRefs.current[`${cell.x}-${cell.y}`] = element;
+                      cellRefs.current[getCellKey(cell.row, cell.col)] = element;
                     }}
                     type="button"
                     onClick={() => handleCellClick(cell)}
-                    className={[
-                      "relative z-10 aspect-square rounded-2xl border text-xl transition duration-200 md:text-2xl",
-                      "backdrop-blur-xl focus:outline-none focus:ring-2 focus:ring-pink-200/90",
-                      cell.isEmpty
-                          ? "border-white/10 bg-white/10 text-transparent" // 空地更透明
-                          : "border-white/90 bg-white/95 text-slate-800 shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:scale-[1.05] hover:border-pink-300 hover:bg-white hover:shadow-[0_8px_20px_rgba(244,114,182,0.2)]", // 实心方块加了淡粉色 hover 阴影
-                      cell.isSelected ? "shadow-glow ring-2 ring-pink-300" : ""
-                    ].join(" ")}
-                    aria-label={`第${cell.x + 1}行 第${cell.y + 1}列`}
+                    className={getCellButtonClassName(cell)}
+                    aria-label={`第${cell.row + 1}行 第${cell.col + 1}列`}
                   >
                     {!cell.isEmpty && (
                       <IconComponent

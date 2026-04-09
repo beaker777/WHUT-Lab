@@ -1,4 +1,4 @@
-package com.beaker.Lab03.backend.pojo;
+package com.beaker.Lab03.backend.model.pojo;
 
 import lombok.Data;
 

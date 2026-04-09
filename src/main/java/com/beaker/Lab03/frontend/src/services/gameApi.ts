@@ -1,6 +1,6 @@
 import type { GameBoardResponse, MatchCheckResponse } from "../types/game";
 
-interface MatchCheckPayload {
+export interface MatchCheckPayload {
   map: number[][];
   v1: {
     row: number;
