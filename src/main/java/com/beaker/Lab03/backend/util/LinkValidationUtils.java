@@ -1,5 +1,6 @@
 package com.beaker.Lab03.backend.util;
 
+import com.beaker.Lab03.backend.model.dto.GameRuleConfig;
 import com.beaker.Lab03.backend.model.pojo.Vertex;
 
 /**
@@ -14,13 +15,13 @@ public final class LinkValidationUtils {
      * @param map 前端或服务端传入的棋盘二维数组
      * @return 合法返回 true，否则返回 false
      */
-    public static boolean isValidMap(int[][] map) {
-        if (map == null || map.length != LinkGameConstants.EXPECTED_ROWS) {
+    public static boolean isValidMap(int[][] map, GameRuleConfig config) {
+        if (!LinkDifficultyPresets.isRuleConfigValid(config) || map == null || map.length != config.getRows()) {
             return false;
         }
 
         for (int[] row : map) {
-            if (row == null || row.length != LinkGameConstants.EXPECTED_COLS) {
+            if (row == null || row.length != config.getCols()) {
                 return false;
             }
         }
@@ -33,7 +34,7 @@ public final class LinkValidationUtils {
      * @param vertex 待校验的坐标点
      * @return 坐标合法返回 true，否则返回 false
      */
-    public static boolean isCoordinateValid(Vertex vertex) {
+    public static boolean isCoordinateValid(Vertex vertex, GameRuleConfig config) {
         if (vertex == null) {
             return false;
         }
@@ -41,9 +42,9 @@ public final class LinkValidationUtils {
         int row = vertex.getRow();
         int col = vertex.getCol();
         return row >= 0
-                && row < LinkGameConstants.EXPECTED_ROWS
+                && row < config.getRows()
                 && col >= 0
-                && col < LinkGameConstants.EXPECTED_COLS;
+                && col < config.getCols();
     }
 
     /**
@@ -55,10 +56,15 @@ public final class LinkValidationUtils {
      * @param secondVertex 第二个坐标点
      * @return 合法返回 true，否则返回 false
      */
-    public static boolean isValidMatchRequest(int[][] map, Vertex firstVertex, Vertex secondVertex) {
-        if (!isValidMap(map)
-                || !isCoordinateValid(firstVertex)
-                || !isCoordinateValid(secondVertex)
+    public static boolean isValidMatchRequest(
+            int[][] map,
+            Vertex firstVertex,
+            Vertex secondVertex,
+            GameRuleConfig config
+    ) {
+        if (!isValidMap(map, config)
+                || !isCoordinateValid(firstVertex, config)
+                || !isCoordinateValid(secondVertex, config)
                 || map[firstVertex.getRow()][firstVertex.getCol()] == LinkGameConstants.BLANK
                 || map[secondVertex.getRow()][secondVertex.getCol()] == LinkGameConstants.BLANK) {
             return false;

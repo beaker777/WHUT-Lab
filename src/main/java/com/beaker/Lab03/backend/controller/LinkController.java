@@ -1,26 +1,32 @@
 package com.beaker.Lab03.backend.controller;
 
 import com.beaker.Lab03.backend.model.dto.GameBoardResponse;
+import com.beaker.Lab03.backend.model.dto.GameRuleConfig;
 import com.beaker.Lab03.backend.model.dto.HintResponse;
+import com.beaker.Lab03.backend.model.dto.InitGameRequest;
 import com.beaker.Lab03.backend.model.dto.MatchCheckRequest;
 import com.beaker.Lab03.backend.model.dto.MatchCheckResponse;
 import com.beaker.Lab03.backend.model.dto.MatchResult;
 import com.beaker.Lab03.backend.model.dto.ShuffleMapRequest;
+import com.beaker.Lab03.backend.model.pojo.Vertex;
 import com.beaker.Lab03.backend.service.LinkBoardInitializationService;
 import com.beaker.Lab03.backend.service.LinkDeadlockResolutionService;
 import com.beaker.Lab03.backend.service.LinkHintService;
 import com.beaker.Lab03.backend.service.LinkMatchCheckService;
+import com.beaker.Lab03.backend.util.LinkDifficultyPresets;
+import com.beaker.Lab03.backend.util.LinkValidationUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 欢乐连连看 HTTP 接口。
- * 对前端暴露的职责包括：初始化棋盘、洗牌、以及两点消除校验。
+ * 对前端暴露的职责包括：初始化棋盘、洗牌、提示以及两点消除校验。
  */
 @RestController
 @RequestMapping("/api/game")
@@ -46,12 +52,23 @@ public class LinkController {
     /**
      * 创建一局新的游戏棋盘。
      */
-    @GetMapping("/init")
-    public ResponseEntity<GameBoardResponse> initGame() {
-        int[][] initialMap = boardInitializationService.initMap();
-        int[][] resolvedMap = deadlockResolutionService.resolveDeadlock(initialMap);
+    @PostMapping("/init")
+    public ResponseEntity<GameBoardResponse> initGame(@RequestBody InitGameRequest request) {
+        GameRuleConfig config = LinkDifficultyPresets.resolveRuleConfig(request == null ? null : request.getDifficulty());
+        int[][] initialMap = boardInitializationService.initMap(config);
+        if (initialMap == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(GameBoardResponse.of(false, "难度配置不合法", null, config));
+        }
+
+        int[][] resolvedMap = deadlockResolutionService.resolveDeadlock(initialMap, config);
+        if (resolvedMap == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(GameBoardResponse.of(false, "棋盘初始化失败", null, config));
+        }
+
         return ResponseEntity.ok(
-                GameBoardResponse.of(true, "棋盘初始化成功", resolvedMap)
+                GameBoardResponse.of(true, "棋盘初始化成功", resolvedMap, config)
         );
     }
 
@@ -60,18 +77,24 @@ public class LinkController {
      */
     @PostMapping("/shuffle")
     public ResponseEntity<GameBoardResponse> shuffleGame(@RequestBody ShuffleMapRequest request) {
-        if (request == null || request.getMap() == null) {
+        if (request == null || request.getMap() == null || request.getConfig() == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(GameBoardResponse.of(false, "请求参数不完整", null));
+                    .body(GameBoardResponse.of(false, "请求参数不完整", null, null));
         }
 
-        int[][] shuffledMap = deadlockResolutionService.resolveDeadlock(boardInitializationService.shuffleMap(request.getMap()));
-        if (shuffledMap == null) {
+        if (!LinkValidationUtils.isValidMap(request.getMap(), request.getConfig())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(GameBoardResponse.of(false, "地图格式不合法", null));
+                    .body(GameBoardResponse.of(false, "地图格式不合法", null, request.getConfig()));
         }
 
-        return ResponseEntity.ok(GameBoardResponse.of(true, "棋盘打乱成功", shuffledMap));
+        int[][] shuffledMap = boardInitializationService.shuffleMap(request.getMap(), request.getConfig());
+        int[][] resolvedMap = deadlockResolutionService.resolveDeadlock(shuffledMap, request.getConfig());
+        if (resolvedMap == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(GameBoardResponse.of(false, "地图格式不合法", null, request.getConfig()));
+        }
+
+        return ResponseEntity.ok(GameBoardResponse.of(true, "棋盘打乱成功", resolvedMap, request.getConfig()));
     }
 
     /**
@@ -79,22 +102,22 @@ public class LinkController {
      */
     @PostMapping("/hint")
     public ResponseEntity<HintResponse> getHint(@RequestBody ShuffleMapRequest request) {
-        if (request == null || request.getMap() == null) {
+        if (request == null || request.getMap() == null || request.getConfig() == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(HintResponse.of(false, "请求参数不完整", null));
+                    .body(HintResponse.of(false, "请求参数不完整", null, null));
         }
 
-        if (!com.beaker.Lab03.backend.util.LinkValidationUtils.isValidMap(request.getMap())) {
+        if (!LinkValidationUtils.isValidMap(request.getMap(), request.getConfig())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(HintResponse.of(false, "地图格式不合法", null));
+                    .body(HintResponse.of(false, "地图格式不合法", request.getConfig(), null));
         }
 
-        java.util.List<com.beaker.Lab03.backend.model.pojo.Vertex> hintPair = hintService.findHintPair(request.getMap());
+        List<Vertex> hintPair = hintService.findHintPair(request.getMap(), request.getConfig());
         if (hintPair.isEmpty()) {
-            return ResponseEntity.ok(HintResponse.of(false, "当前棋盘没有可提示的组合", hintPair));
+            return ResponseEntity.ok(HintResponse.of(false, "当前棋盘没有可提示的组合", request.getConfig(), hintPair));
         }
 
-        return ResponseEntity.ok(HintResponse.of(true, "已为你标出一组可消除图块", hintPair));
+        return ResponseEntity.ok(HintResponse.of(true, "已为你标出一组可消除图块", request.getConfig(), hintPair));
     }
 
     /**
@@ -102,21 +125,29 @@ public class LinkController {
      */
     @PostMapping("/match-check")
     public ResponseEntity<MatchCheckResponse> checkMatch(@RequestBody MatchCheckRequest request) {
-        if (request == null || request.getMap() == null || request.getV1() == null || request.getV2() == null) {
+        if (request == null
+                || request.getMap() == null
+                || request.getConfig() == null
+                || request.getV1() == null
+                || request.getV2() == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(MatchCheckResponse.of(false, "请求参数不完整", null, null));
+                    .body(MatchCheckResponse.of(false, "请求参数不完整", null, null, null));
         }
 
-        MatchResult result = matchCheckService.checkMatch(request.getMap(), request.getV1(), request.getV2());
+        MatchResult result = matchCheckService.checkMatch(
+                request.getMap(),
+                request.getV1(),
+                request.getV2(),
+                request.getConfig()
+        );
         int[][] responseMap = request.getMap();
         String message = "当前两个方块无法连通";
         if (result.isConnected()) {
-            boolean deadlocked = deadlockResolutionService.isDeadlocked(responseMap);
-            if (deadlocked) {
-                int[][] resolvedMap = deadlockResolutionService.resolveDeadlock(responseMap);
+            if (deadlockResolutionService.isDeadlocked(responseMap, request.getConfig())) {
+                int[][] resolvedMap = deadlockResolutionService.resolveDeadlock(responseMap, request.getConfig());
                 if (resolvedMap == null) {
                     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                            .body(MatchCheckResponse.of(false, "地图格式不合法", null, null));
+                            .body(MatchCheckResponse.of(false, "地图格式不合法", null, request.getConfig(), null));
                 }
                 responseMap = resolvedMap;
                 message = "匹配成功，当前棋盘进入死局，已自动打乱";
@@ -126,7 +157,7 @@ public class LinkController {
         }
 
         return ResponseEntity.ok(
-                MatchCheckResponse.of(result.isConnected(), message, responseMap, result.getPath())
+                MatchCheckResponse.of(result.isConnected(), message, responseMap, request.getConfig(), result.getPath())
         );
     }
 }

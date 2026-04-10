@@ -1,45 +1,66 @@
 package com.beaker.Lab03.backend.service;
 
+import com.beaker.Lab03.backend.model.dto.GameRuleConfig;
+import com.beaker.Lab03.backend.util.LinkDifficultyPresets;
 import com.beaker.Lab03.backend.util.LinkGameConstants;
 import com.beaker.Lab03.backend.util.LinkValidationUtils;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.Resource;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 欢乐连连看棋盘初始化服务。
- * 负责新棋盘生成和现有棋盘洗牌，不参与具体的连通性判定。
+ * 负责按难度规则生成新棋盘，并根据当前局规则对已有棋盘执行洗牌。
  */
 @Service
 public class LinkBoardInitializationService {
 
+    private static final int MAX_INIT_ATTEMPTS = 300;
+
+    @Resource
+    private LinkHintService hintService;
+
     /**
-     * 初始化一个固定尺寸的新棋盘。
-     * 每种图块都按成对形式生成，确保基础数据满足消除类游戏的配对要求。
+     * 根据当前难度配置初始化一局新棋盘。
+     * 生成后的棋盘必须至少存在可消对子，且可消对子数量要落在当前难度目标范围内。
      *
-     * @return 新生成的棋盘
+     * @param config 当前局规则配置
+     * @return 新生成的棋盘；配置非法时返回 null
      */
-    public int[][] initMap() {
-        List<Integer> tilePairs = new ArrayList<Integer>();
-        int pairCount = LinkGameConstants.EXPECTED_ROWS * LinkGameConstants.EXPECTED_COLS / 2;
-        for (int index = 0; index < pairCount; index++) {
-            int type = index % LinkGameConstants.ICON_TYPE_COUNT + 1;
-            tilePairs.add(type);
-            tilePairs.add(type);
+    public int[][] initMap(GameRuleConfig config) {
+        if (!LinkDifficultyPresets.isRuleConfigValid(config)) {
+            return null;
         }
 
-        shufflePairs(tilePairs);
+        int pairCount = config.getRows() * config.getCols() / 2;
+        int hintPairUpperBound = LinkDifficultyPresets.getPairCountScanUpperBound(config.getDifficulty());
+        for (int attempt = 0; attempt < MAX_INIT_ATTEMPTS; attempt++) {
+            List<Integer> tilePairs = new ArrayList<Integer>();
+            for (int index = 0; index < pairCount; index++) {
+                int type = index % LinkGameConstants.ICON_TYPE_COUNT + 1;
+                tilePairs.add(type);
+                tilePairs.add(type);
+            }
 
-        int[][] map = new int[LinkGameConstants.EXPECTED_ROWS][LinkGameConstants.EXPECTED_COLS];
-        for (int index = 0; index < tilePairs.size(); index++) {
-            int row = index / LinkGameConstants.EXPECTED_COLS;
-            int col = index % LinkGameConstants.EXPECTED_COLS;
-            map[row][col] = tilePairs.get(index);
+            shufflePairs(tilePairs);
+
+            int[][] map = new int[config.getRows()][config.getCols()];
+            for (int index = 0; index < tilePairs.size(); index++) {
+                int row = index / config.getCols();
+                int col = index % config.getCols();
+                map[row][col] = tilePairs.get(index);
+            }
+
+            int availablePairCount = hintService.countConnectablePairs(map, config, hintPairUpperBound);
+            if (LinkDifficultyPresets.isPairCountSuitable(config.getDifficulty(), availablePairCount)) {
+                return map;
+            }
         }
-        return map;
+
+        return buildFallbackMap(config, pairCount);
     }
 
     /**
@@ -47,16 +68,17 @@ public class LinkBoardInitializationService {
      * 已经被消除的位置继续保留为空白，不会在洗牌后重新填充。
      *
      * @param map 当前棋盘
+     * @param config 当前局规则配置
      * @return 打乱后的新棋盘；若输入不合法则返回 null
      */
-    public int[][] shuffleMap(int[][] map) {
-        if (!LinkValidationUtils.isValidMap(map)) {
+    public int[][] shuffleMap(int[][] map, GameRuleConfig config) {
+        if (!LinkValidationUtils.isValidMap(map, config)) {
             return null;
         }
 
         List<Integer> remainingTypes = new ArrayList<Integer>();
-        for (int row = 0; row < LinkGameConstants.EXPECTED_ROWS; row++) {
-            for (int col = 0; col < LinkGameConstants.EXPECTED_COLS; col++) {
+        for (int row = 0; row < config.getRows(); row++) {
+            for (int col = 0; col < config.getCols(); col++) {
                 if (map[row][col] != LinkGameConstants.BLANK) {
                     remainingTypes.add(map[row][col]);
                 }
@@ -65,10 +87,10 @@ public class LinkBoardInitializationService {
 
         shufflePairs(remainingTypes);
 
-        int[][] shuffledMap = new int[LinkGameConstants.EXPECTED_ROWS][LinkGameConstants.EXPECTED_COLS];
+        int[][] shuffledMap = new int[config.getRows()][config.getCols()];
         int valueIndex = 0;
-        for (int row = 0; row < LinkGameConstants.EXPECTED_ROWS; row++) {
-            for (int col = 0; col < LinkGameConstants.EXPECTED_COLS; col++) {
+        for (int row = 0; row < config.getRows(); row++) {
+            for (int col = 0; col < config.getCols(); col++) {
                 if (map[row][col] == LinkGameConstants.BLANK) {
                     shuffledMap[row][col] = LinkGameConstants.BLANK;
                 } else {
@@ -93,30 +115,29 @@ public class LinkBoardInitializationService {
         }
     }
 
-    private void shufflePairsDeadTest(List<Integer> items) {
-        int expectedSize = LinkGameConstants.EXPECTED_ROWS * LinkGameConstants.EXPECTED_COLS;
-        if (items == null || items.size() != expectedSize) {
-            shufflePairs(items);
-            return;
+    /**
+     * 初始化尝试未命中目标区间时的兜底实现。
+     * 兜底方案仍然保证棋盘尺寸合法，并至少生成一局可玩的结果。
+     *
+     * @param config 当前局规则配置
+     * @param pairCount 图块对数量
+     * @return 兜底棋盘
+     */
+    private int[][] buildFallbackMap(GameRuleConfig config, int pairCount) {
+        List<Integer> tilePairs = new ArrayList<Integer>();
+        for (int index = 0; index < pairCount; index++) {
+            int type = index % LinkGameConstants.ICON_TYPE_COUNT + 1;
+            tilePairs.add(type);
+            tilePairs.add(type);
         }
+        shufflePairs(tilePairs);
 
-        /*
-         * 该测试布局只服务于死局检测验证：
-         * 1. 棋盘初始仅保留一对可直接消除的图块 (0,0) 和 (0,1)
-         * 2. 额外保留两个无法继续配对的残留图块，确保消除这一对后棋盘立即进入死局
-         * 3. 其余位置全部置为空白，便于直接观察“消除一次 -> 死局 -> 触发打乱”的流程
-         */
-        for (int row = 0; row < LinkGameConstants.EXPECTED_ROWS; row++) {
-            for (int col = 0; col < LinkGameConstants.EXPECTED_COLS; col++) {
-                items.set(row * LinkGameConstants.EXPECTED_COLS + col, LinkGameConstants.BLANK);
-            }
+        int[][] fallbackMap = new int[config.getRows()][config.getCols()];
+        for (int index = 0; index < tilePairs.size(); index++) {
+            int row = index / config.getCols();
+            int col = index % config.getCols();
+            fallbackMap[row][col] = tilePairs.get(index);
         }
-
-        // 唯一的可消对子。
-        items.set(0, 1);
-        items.set(1, 1);
-        // 保留两个互不配对的残留图块，消除一次后立即进入死局。
-        items.set(LinkGameConstants.EXPECTED_COLS + 2, 2);
-        items.set(LinkGameConstants.EXPECTED_COLS * 2 + 3, 3);
+        return fallbackMap;
     }
 }

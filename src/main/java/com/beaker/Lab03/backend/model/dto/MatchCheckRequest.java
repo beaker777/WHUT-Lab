@@ -15,6 +15,10 @@ public class MatchCheckRequest {
      */
     private int[][] map;
     /**
+     * 当前局规则配置。
+     */
+    private GameRuleConfig config;
+    /**
      * 第一个候选方块坐标。
      */
     private Vertex v1;

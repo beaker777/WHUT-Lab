@@ -16,13 +16,21 @@ public class MatchCheckResponse {
     private boolean connected;
     private String message;
     private int[][] map;
+    private GameRuleConfig config;
     private List<Vertex> path = Collections.emptyList();
 
-    public static MatchCheckResponse of(boolean connected, String message, int[][] map, List<Vertex> path) {
+    public static MatchCheckResponse of(
+            boolean connected,
+            String message,
+            int[][] map,
+            GameRuleConfig config,
+            List<Vertex> path
+    ) {
         MatchCheckResponse response = new MatchCheckResponse();
         response.setConnected(connected);
         response.setMessage(message);
         response.setMap(map);
+        response.setConfig(config);
         response.setPath(path == null ? Collections.<Vertex>emptyList() : new ArrayList<Vertex>(path));
         return response;
     }

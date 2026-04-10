@@ -12,12 +12,14 @@ public class GameBoardResponse {
     private boolean success;
     private String message;
     private int[][] map;
+    private GameRuleConfig config;
 
-    public static GameBoardResponse of(boolean success, String message, int[][] map) {
+    public static GameBoardResponse of(boolean success, String message, int[][] map, GameRuleConfig config) {
         GameBoardResponse response = new GameBoardResponse();
         response.setSuccess(success);
         response.setMessage(message);
         response.setMap(map);
+        response.setConfig(config);
         return response;
     }
 }

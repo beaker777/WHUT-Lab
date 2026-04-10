@@ -1,7 +1,5 @@
 import type { CellData } from "../types/game";
 
-export const ROWS = 10;
-export const COLS = 16;
 const EMPTY_CELL_TYPE = 0;
 
 function createCell(row: number, col: number, type: number): CellData {
@@ -20,9 +18,9 @@ export function createBoardFromMap(map: number[][]): CellData[][] {
   );
 }
 
-export function createEmptyBoard(): CellData[][] {
-  return Array.from({ length: ROWS }, (_, rowIndex) =>
-    Array.from({ length: COLS }, (_, colIndex) => createCell(rowIndex, colIndex, EMPTY_CELL_TYPE))
+export function createEmptyBoard(rows = 0, cols = 0): CellData[][] {
+  return Array.from({ length: rows }, (_, rowIndex) =>
+    Array.from({ length: cols }, (_, colIndex) => createCell(rowIndex, colIndex, EMPTY_CELL_TYPE))
   );
 }
 

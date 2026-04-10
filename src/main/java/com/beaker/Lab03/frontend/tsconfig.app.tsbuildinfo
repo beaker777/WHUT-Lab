@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/happylinkgame.tsx","./src/services/gameapi.ts","./src/types/game.ts","./src/utils/board.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/gametile.tsx","./src/components/happylinkgame.tsx","./src/services/gameapi.ts","./src/types/game.ts","./src/utils/board.ts"],"version":"5.9.3"}
