@@ -53,6 +53,35 @@ button {
   }
 }
 
+@keyframes draw-line {
+  from {
+    stroke-dashoffset: var(--line-length, 0px);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes hintBlink {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(249, 168, 212, 0);
+    opacity: 0.96;
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow:
+      0 0 0 4px rgba(254, 240, 138, 0.5),
+      0 0 28px rgba(249, 168, 212, 0.45);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(249, 168, 212, 0);
+    opacity: 0.96;
+  }
+}
+
 .macaron-orb {
   position: absolute;
   border-radius: 9999px;
@@ -74,6 +103,27 @@ button {
   animation-duration: 10.5s;
 }
 
-.soft-link-line {
-  animation: softPulse 0.9s ease-in-out infinite;
+.jelly-link-line {
+  stroke-dasharray: var(--line-length, 0px);
+  stroke-dashoffset: var(--line-length, 0px);
+  animation: draw-line 0.3s ease-out forwards;
+}
+
+.jelly-link-line--glow {
+  opacity: 0.92;
+  animation:
+    draw-line 0.3s ease-out forwards,
+    softPulse 0.95s ease-in-out infinite;
+}
+
+.jelly-link-line--support {
+  opacity: 0.95;
+}
+
+.jelly-link-line--core {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.95));
+}
+
+.hint-tile-blink {
+  animation: hintBlink 0.9s ease-in-out infinite;
 }

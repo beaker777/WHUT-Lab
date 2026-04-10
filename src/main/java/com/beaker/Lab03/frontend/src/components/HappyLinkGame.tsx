@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Cloud,
   Gem,
   Heart,
+  Lightbulb,
   Leaf,
   Moon,
   Star,
   Sun,
   Zap
 } from "lucide-react";
-import { initGameBoard, matchCheck } from "../services/gameApi";
+import { fetchHint, initGameBoard, matchCheck } from "../services/gameApi";
 import type { CellData, MatchVertex } from "../types/game";
 import { COLS, ROWS, createBoardFromMap, createEmptyBoard, createMapFromBoard, updateBoardCell } from "../utils/board";
 
@@ -28,28 +29,110 @@ const TILE_COLORS = [
 ] as const;
 
 interface LinePoint {
-  left: number;
-  top: number;
+  x: number;
+  y: number;
 }
 
-export function HappyLinkGame() {
+interface HappyLinkGameProps {
+  elapsedSeconds: number;
+  isPaused: boolean;
+  onGameWon: () => void;
+  onPauseRequest: () => void;
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function HappyLinkGame({
+  elapsedSeconds,
+  isPaused,
+  onGameWon,
+  onPauseRequest
+}: HappyLinkGameProps) {
   const [board, setBoard] = useState<CellData[][]>(() => createEmptyBoard());
   const [selectedCells, setSelectedCells] = useState<CellData[]>([]);
   const [statusMessage, setStatusMessage] = useState("棋盘准备中，马上开始配对。");
+  const [deadlockNotice, setDeadlockNotice] = useState("");
+  const [hintCells, setHintCells] = useState<MatchVertex[]>([]);
   const [pathPreview, setPathPreview] = useState<MatchVertex[]>([]);
   const [linePoints, setLinePoints] = useState<LinePoint[]>([]);
+  const [isPathFading, setIsPathFading] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isLoadingBoard, setIsLoadingBoard] = useState(false);
+  const [hasBoardLoaded, setHasBoardLoaded] = useState(false);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const cellRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const clearLineTimerRef = useRef<number | null>(null);
+  const removeLineTimerRef = useRef<number | null>(null);
+  const clearHintTimerRef = useRef<number | null>(null);
+  const hintFrameRef = useRef<number | null>(null);
+  const hasReportedVictoryRef = useRef(false);
 
   const selectedCount = selectedCells.length;
   const totalCells = useMemo(() => ROWS * COLS, []);
+  const remainingTileCount = useMemo(
+    () => board.flat().filter((cell) => !cell.isEmpty).length,
+    [board]
+  );
+  const formattedElapsedTime = useMemo(
+    () => formatElapsedTime(elapsedSeconds),
+    [elapsedSeconds]
+  );
+  const linePath = useMemo(
+    () => linePoints.map((point) => `${point.x},${point.y}`).join(" "),
+    [linePoints]
+  );
+  const lineLength = useMemo(() => {
+    if (linePoints.length < 2) {
+      return 0;
+    }
+
+    return linePoints.slice(1).reduce((totalLength, point, index) => {
+      const previousPoint = linePoints[index];
+      return totalLength + Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
+    }, 0);
+  }, [linePoints]);
+  const gradientStartPoint = linePoints[0];
+  const gradientEndPoint = linePoints[linePoints.length - 1];
+
+  const clearLineTimers = () => {
+    if (clearLineTimerRef.current !== null) {
+      window.clearTimeout(clearLineTimerRef.current);
+      clearLineTimerRef.current = null;
+    }
+    if (removeLineTimerRef.current !== null) {
+      window.clearTimeout(removeLineTimerRef.current);
+      removeLineTimerRef.current = null;
+    }
+  };
+
+  const clearHintTimer = () => {
+    if (clearHintTimerRef.current !== null) {
+      window.clearTimeout(clearHintTimerRef.current);
+      clearHintTimerRef.current = null;
+    }
+    if (hintFrameRef.current !== null) {
+      window.cancelAnimationFrame(hintFrameRef.current);
+      hintFrameRef.current = null;
+    }
+  };
+
+  const hideLineImmediately = () => {
+    clearLineTimers();
+    setIsPathFading(false);
+    setLinePoints([]);
+  };
+
   const resetVisualState = () => {
     setSelectedCells([]);
     setPathPreview([]);
-    setLinePoints([]);
+    setDeadlockNotice("");
+    clearHintTimer();
+    setHintCells([]);
+    hideLineImmediately();
   };
 
   const getCellKey = (row: number, col: number) => `${row}-${col}`;
@@ -60,6 +143,9 @@ export function HappyLinkGame() {
     type: cell.type
   });
 
+  const isHintCell = (cell: CellData) =>
+    hintCells.some((hintCell) => hintCell.row === cell.row && hintCell.col === cell.col);
+
   const getCellButtonClassName = (cell: CellData) =>
     [
       "relative z-10 aspect-square rounded-2xl border text-xl transition duration-200 md:text-2xl",
@@ -67,7 +153,10 @@ export function HappyLinkGame() {
       cell.isEmpty
         ? "border-white/10 bg-white/10 text-transparent"
         : "border-white/90 bg-white/95 text-slate-800 shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:scale-[1.05] hover:border-pink-300 hover:bg-white hover:shadow-[0_8px_20px_rgba(244,114,182,0.2)]",
-      cell.isSelected ? "shadow-glow ring-2 ring-pink-300" : ""
+      cell.isSelected ? "shadow-glow ring-2 ring-pink-300" : "",
+      !cell.isSelected && isHintCell(cell)
+        ? "hint-tile-blink border-amber-200 bg-gradient-to-br from-rose-50 via-amber-50 to-sky-50 ring-2 ring-amber-200/80"
+        : ""
     ].join(" ");
 
   const loadInitialBoard = async () => {
@@ -77,6 +166,8 @@ export function HappyLinkGame() {
       const result = await initGameBoard();
       setBoard(createBoardFromMap(result.map));
       resetVisualState();
+      setHasBoardLoaded(true);
+      hasReportedVictoryRef.current = false;
       setStatusMessage(result.success ? "新棋局已就绪，试着找出第一对可连接的图案吧。" : "棋盘初始化失败。");
     } catch (error) {
       console.error(error);
@@ -98,7 +189,7 @@ export function HappyLinkGame() {
 
   const drawLinkLine = (path: MatchVertex[]) => {
     if (!boardRef.current || path.length < 2) {
-      setLinePoints([]);
+      hideLineImmediately();
       return;
     }
 
@@ -112,34 +203,62 @@ export function HappyLinkGame() {
 
         const cellRect = cellElement.getBoundingClientRect();
         return {
-          left: cellRect.left - boardRect.left + cellRect.width / 2,
-          top: cellRect.top - boardRect.top + cellRect.height / 2
+          x: cellRect.left - boardRect.left + cellRect.width / 2,
+          y: cellRect.top - boardRect.top + cellRect.height / 2
         };
       })
       .filter((point): point is LinePoint => point !== null);
 
+    clearLineTimers();
+    setIsPathFading(false);
     setLinePoints(points);
 
     if (points.length > 1) {
-      if (clearLineTimerRef.current !== null) {
-        window.clearTimeout(clearLineTimerRef.current);
-      }
-      // 连线只作为短暂反馈展示，避免覆盖后续点击判断。
+      // 连线先完整播放，再进入短暂淡出，避免覆盖后续点击判断。
       clearLineTimerRef.current = window.setTimeout(() => {
-        setLinePoints([]);
+        setIsPathFading(true);
         clearLineTimerRef.current = null;
       }, LINE_DISPLAY_MS);
+
+      removeLineTimerRef.current = window.setTimeout(() => {
+        setLinePoints([]);
+        setIsPathFading(false);
+        removeLineTimerRef.current = null;
+      }, LINE_DISPLAY_MS + 300);
     }
+  };
+
+  const showHintTiles = (nextHintTiles: MatchVertex[]) => {
+    clearHintTimer();
+    setHintCells([]);
+
+    hintFrameRef.current = window.requestAnimationFrame(() => {
+      setHintCells(nextHintTiles);
+      hintFrameRef.current = null;
+      clearHintTimerRef.current = window.setTimeout(() => {
+        setHintCells([]);
+        clearHintTimerRef.current = null;
+      }, 2400);
+    });
   };
 
   useEffect(() => {
     void loadInitialBoard();
     return () => {
-      if (clearLineTimerRef.current !== null) {
-        window.clearTimeout(clearLineTimerRef.current);
-      }
+      clearLineTimers();
+      clearHintTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasBoardLoaded || isLoadingBoard || remainingTileCount !== 0 || hasReportedVictoryRef.current) {
+      return;
+    }
+
+    hasReportedVictoryRef.current = true;
+    setStatusMessage("你已经清空整个棋盘，胜利属于你。");
+    onGameWon();
+  }, [hasBoardLoaded, isLoadingBoard, onGameWon, remainingTileCount]);
 
   const handleMatchCheck = async (cell1: CellData, cell2: CellData) => {
     setIsChecking(true);
@@ -152,8 +271,16 @@ export function HappyLinkGame() {
         v2: buildMatchVertex(cell2)
       });
       setPathPreview(result.path ?? []);
+      clearHintTimer();
+      setHintCells([]);
       setStatusMessage(
-        result.connected ? "消除成功，继续寻找下一对图案。" : "这两个图案暂时无法连接，换一组试试。"
+        result.message
+          || (result.connected ? "消除成功，继续寻找下一对图案。" : "这两个图案暂时无法连接，换一组试试。")
+      );
+      setDeadlockNotice(
+        result.message.includes("已自动打乱")
+          ? "当前棋盘已经没有可消除的组合，系统已为你自动重排剩余图块。"
+          : ""
       );
       drawLinkLine(result.path ?? []);
 
@@ -174,10 +301,40 @@ export function HappyLinkGame() {
     }
   };
 
-  const handleCellClick = (cell: CellData) => {
-    if (isLoadingBoard || isChecking || cell.isEmpty || cell.isSelected || selectedCells.length >= 2) {
+  const handleHintRequest = async () => {
+    if (isPaused || isLoadingBoard || isChecking) {
       return;
     }
+
+    clearHintTimer();
+    setHintCells([]);
+    if (selectedCells.length > 0) {
+      clearSelectedState(selectedCells);
+    }
+
+    try {
+      const result = await fetchHint(createMapFromBoard(board));
+      setStatusMessage(result.message || "已为你找到一组可消除图块。");
+
+      if (!result.success || result.hintTiles.length !== 2) {
+        return;
+      }
+
+      setDeadlockNotice("");
+      showHintTiles(result.hintTiles);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("提示请求失败，请确认游戏服务运行正常。");
+    }
+  };
+
+  const handleCellClick = (cell: CellData) => {
+    if (isPaused || isLoadingBoard || isChecking || cell.isEmpty || cell.isSelected || selectedCells.length >= 2) {
+      return;
+    }
+
+    clearHintTimer();
+    setHintCells([]);
 
     // 连连看一次业务流程最多只缓存两次点击，第二次点击后立即发起消除判断。
     const nextSelectedCells = [...selectedCells, { ...cell, isSelected: true }];
@@ -218,15 +375,38 @@ export function HappyLinkGame() {
               已选中 <span className="font-bold text-rose-400">{selectedCount}</span> / 2
               <span className="mx-2 text-slate-400">|</span>
               总格子 <span className="font-bold text-sky-400">{totalCells}</span>
+              <span className="mx-2 text-slate-400">|</span>
+              用时 <span className="font-bold text-amber-400">{formattedElapsedTime}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => void loadInitialBoard()}
-              disabled={isLoadingBoard}
-              className="rounded-2xl border border-white/80 bg-gradient-to-r from-pink-200 via-amber-100 to-green-100 px-6 py-4 text-base font-bold text-slate-900 shadow-[0_12px_40px_rgba(248,200,220,0.38)] transition duration-200 hover:scale-[1.02] hover:shadow-[0_18px_50px_rgba(205,231,255,0.4)] focus:outline-none focus:ring-4 focus:ring-pink-200/80 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isLoadingBoard ? "正在准备棋盘..." : "开始游戏 / 重新开始"}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void handleHintRequest()}
+                disabled={isLoadingBoard || isChecking}
+                className="rounded-2xl border border-white/80 bg-gradient-to-r from-amber-100 via-rose-100 to-sky-100 px-5 py-4 text-base font-bold text-slate-800 shadow-[0_10px_30px_rgba(255,239,176,0.35)] transition duration-200 hover:scale-[1.02] hover:shadow-[0_16px_38px_rgba(251,191,36,0.2)] focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Lightbulb className="h-4 w-4 text-amber-500" />
+                  提示一下
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={onPauseRequest}
+                disabled={isLoadingBoard || isChecking}
+                className="rounded-2xl border border-white/80 bg-white/85 px-5 py-4 text-base font-bold text-slate-700 shadow-[0_10px_30px_rgba(255,255,255,0.3)] transition duration-200 hover:scale-[1.02] hover:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                暂停游戏
+              </button>
+              <button
+                type="button"
+                onClick={() => void loadInitialBoard()}
+                disabled={isLoadingBoard}
+                className="rounded-2xl border border-white/80 bg-gradient-to-r from-pink-200 via-amber-100 to-green-100 px-6 py-4 text-base font-bold text-slate-900 shadow-[0_12px_40px_rgba(248,200,220,0.38)] transition duration-200 hover:scale-[1.02] hover:shadow-[0_18px_50px_rgba(205,231,255,0.4)] focus:outline-none focus:ring-4 focus:ring-pink-200/80 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isLoadingBoard ? "正在准备棋盘..." : "开始游戏 / 重新开始"}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -242,31 +422,76 @@ export function HappyLinkGame() {
               }}
             >
               {linePoints.length > 1 && (
-                <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible animate-pulse">
-                  {/* 三层描边用于模拟经典连连看的立体连线反馈。 */}
+                <svg
+                  className={`pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible transition-opacity duration-300 ${
+                    isPathFading ? "opacity-0" : "opacity-100"
+                  }`}
+                >
+                  <defs>
+                    <linearGradient
+                      id="jelly-line-gradient"
+                      gradientUnits="userSpaceOnUse"
+                      x1={gradientStartPoint?.x ?? 0}
+                      y1={gradientStartPoint?.y ?? 0}
+                      x2={gradientEndPoint?.x ?? 0}
+                      y2={gradientEndPoint?.y ?? 0}
+                    >
+                      <stop offset="0%" stopColor="#f9c6dc" />
+                      <stop offset="48%" stopColor="#fde68a" />
+                      <stop offset="100%" stopColor="#bae6fd" />
+                    </linearGradient>
+                    <linearGradient
+                      id="jelly-line-core-gradient"
+                      gradientUnits="userSpaceOnUse"
+                      x1={gradientStartPoint?.x ?? 0}
+                      y1={gradientStartPoint?.y ?? 0}
+                      x2={gradientEndPoint?.x ?? 0}
+                      y2={gradientEndPoint?.y ?? 0}
+                    >
+                      <stop offset="0%" stopColor="#fffdfd" />
+                      <stop offset="50%" stopColor="#ffffff" />
+                      <stop offset="100%" stopColor="#f8fdff" />
+                    </linearGradient>
+                    <filter id="jelly-glow" x="-40%" y="-40%" width="180%" height="180%">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="jelly-blur" />
+                    </filter>
+                  </defs>
                   <polyline
-                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    points={linePath}
                     fill="none"
-                    stroke="#fbcfe8"
-                    strokeLinecap="square"
-                    strokeLinejoin="miter"
-                    strokeWidth="14"
+                    stroke="url(#jelly-line-gradient)"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="16"
+                    filter="url(#jelly-glow)"
+                    className="jelly-link-line jelly-link-line--glow"
+                    style={{
+                      "--line-length": `${lineLength}px`
+                    } as CSSProperties}
                   />
                   <polyline
-                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    points={linePath}
                     fill="none"
-                    stroke="#f472b6"
-                    strokeLinecap="square"
-                    strokeLinejoin="miter"
-                    strokeWidth="8"
+                    stroke="#f9c6dc"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="10"
+                    className="jelly-link-line jelly-link-line--support"
+                    style={{
+                      "--line-length": `${lineLength}px`
+                    } as CSSProperties}
                   />
                   <polyline
-                    points={linePoints.map((point) => `${point.left},${point.top}`).join(" ")}
+                    points={linePath}
                     fill="none"
-                    stroke="#ffffff"
-                    strokeLinecap="square"
-                    strokeLinejoin="miter"
-                    strokeWidth="3"
+                    stroke="url(#jelly-line-core-gradient)"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="6"
+                    className="jelly-link-line jelly-link-line--core"
+                    style={{
+                      "--line-length": `${lineLength}px`
+                    } as CSSProperties}
                   />
                 </svg>
               )}
@@ -307,6 +532,11 @@ export function HappyLinkGame() {
               <p>成功配对时会在棋盘上显示连线路径，帮助你快速判断下一步策略。</p>
               <p>清空全部图案即可完成本局挑战，重新开始会生成一张全新的棋盘。</p>
             </div>
+            {deadlockNotice ? (
+              <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-r from-amber-50 via-rose-50 to-sky-50 px-4 py-4 text-sm leading-6 text-amber-900 shadow-[0_8px_24px_rgba(251,191,36,0.16)]">
+                当前已经没有可以被消除的图块，系统已自动进行重排。
+              </div>
+            ) : null}
             <div className="rounded-2xl border border-white/60 bg-pink-50/75 px-4 py-4 text-sm text-slate-700">
               {statusMessage}
             </div>

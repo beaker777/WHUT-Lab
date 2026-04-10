@@ -1,4 +1,4 @@
-import type { GameBoardResponse, MatchCheckResponse } from "../types/game";
+import type { GameBoardResponse, HintResponse, MatchCheckResponse } from "../types/game";
 
 export interface MatchCheckPayload {
   map: number[][];
@@ -49,4 +49,16 @@ export async function matchCheck(payload: MatchCheckPayload): Promise<MatchCheck
   });
 
   return parseJsonResponse<MatchCheckResponse>(response);
+}
+
+export async function fetchHint(map: number[][]): Promise<HintResponse> {
+  const response = await fetch("/api/game/hint", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ map })
+  });
+
+  return parseJsonResponse<HintResponse>(response);
 }

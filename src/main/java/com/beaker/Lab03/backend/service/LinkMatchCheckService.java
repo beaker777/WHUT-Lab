@@ -50,12 +50,29 @@ public class LinkMatchCheckService {
             return MatchResult.failure();
         }
 
-        MatchResult result = findMatchByZeroOneBfs(map, firstVertex, secondVertex);
+        MatchResult result = findMatchByZeroOneBfs(map, firstVertex, secondVertex, true);
         if (result.isConnected()) {
             map[firstVertex.getRow()][firstVertex.getCol()] = LinkGameConstants.BLANK;
             map[secondVertex.getRow()][secondVertex.getCol()] = LinkGameConstants.BLANK;
         }
         return result;
+    }
+
+    /**
+     * 仅判断两个点当前是否可以连通，不修改棋盘内容。
+     * 该方法用于死局检测阶段，避免在扫描可消对子时误删图块。
+     *
+     * @param map 当前棋盘
+     * @param firstVertex 第一个方块坐标
+     * @param secondVertex 第二个方块坐标
+     * @return 可以连通返回 true，否则返回 false
+     */
+    public boolean canConnect(int[][] map, Vertex firstVertex, Vertex secondVertex) {
+        if (!LinkValidationUtils.isValidMatchRequest(map, firstVertex, secondVertex)) {
+            return false;
+        }
+
+        return findMatchByZeroOneBfs(map, firstVertex, secondVertex, false).isConnected();
     }
 
     /**
@@ -66,7 +83,7 @@ public class LinkMatchCheckService {
      * @param end 终点
      * @return 搜索结果
      */
-    private MatchResult findMatchByZeroOneBfs(int[][] map, Vertex start, Vertex end) {
+    private MatchResult findMatchByZeroOneBfs(int[][] map, Vertex start, Vertex end, boolean needPath) {
         int[][] dist = new int[EXPECTED_ROWS][EXPECTED_COLS];
         int[][] prev = new int[EXPECTED_ROWS][EXPECTED_COLS];
 
@@ -120,6 +137,10 @@ public class LinkMatchCheckService {
 
                 // 如果当前节点是 end, 直接返回
                 if (nextRow == end.getRow() && nextCol == end.getCol()) {
+                    if (!needPath) {
+                        return MatchResult.success("NONE", Collections.<Vertex>emptyList());
+                    }
+
                     // 获取完整路径
                     List<Vertex> fullPath = buildFullPath(prev, start, end);
                     // 获取关键路径

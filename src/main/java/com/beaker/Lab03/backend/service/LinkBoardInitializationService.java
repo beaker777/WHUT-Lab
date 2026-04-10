@@ -5,6 +5,7 @@ import com.beaker.Lab03.backend.util.LinkValidationUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -90,5 +91,32 @@ public class LinkBoardInitializationService {
             items.set(currentIndex, items.get(randomIndex));
             items.set(randomIndex, temp);
         }
+    }
+
+    private void shufflePairsDeadTest(List<Integer> items) {
+        int expectedSize = LinkGameConstants.EXPECTED_ROWS * LinkGameConstants.EXPECTED_COLS;
+        if (items == null || items.size() != expectedSize) {
+            shufflePairs(items);
+            return;
+        }
+
+        /*
+         * 该测试布局只服务于死局检测验证：
+         * 1. 棋盘初始仅保留一对可直接消除的图块 (0,0) 和 (0,1)
+         * 2. 额外保留两个无法继续配对的残留图块，确保消除这一对后棋盘立即进入死局
+         * 3. 其余位置全部置为空白，便于直接观察“消除一次 -> 死局 -> 触发打乱”的流程
+         */
+        for (int row = 0; row < LinkGameConstants.EXPECTED_ROWS; row++) {
+            for (int col = 0; col < LinkGameConstants.EXPECTED_COLS; col++) {
+                items.set(row * LinkGameConstants.EXPECTED_COLS + col, LinkGameConstants.BLANK);
+            }
+        }
+
+        // 唯一的可消对子。
+        items.set(0, 1);
+        items.set(1, 1);
+        // 保留两个互不配对的残留图块，消除一次后立即进入死局。
+        items.set(LinkGameConstants.EXPECTED_COLS + 2, 2);
+        items.set(LinkGameConstants.EXPECTED_COLS * 2 + 3, 3);
     }
 }

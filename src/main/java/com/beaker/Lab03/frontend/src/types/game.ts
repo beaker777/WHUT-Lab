@@ -20,6 +20,12 @@ export interface MatchCheckResponse {
   path: MatchVertex[];
 }
 
+export interface HintResponse {
+  success: boolean;
+  message: string;
+  hintTiles: MatchVertex[];
+}
+
 export interface GameBoardResponse {
   success: boolean;
   message: string;
